@@ -123,6 +123,7 @@ while (cap.isOpened()):
     # cv.imshow("hough", lines_visualize)
     # Overlays lines on frame by taking their weighted sums and adding an arbitrary scalar value of 1 as the gamma argument
     output = cv.addWeighted(frame, 0.9, lines_visualize, 1, 1)
+    cv.imshow("output", output)
     # Opens a new window and displays the output frame
     ######
     st.header('Input Video')
@@ -131,7 +132,7 @@ while (cap.isOpened()):
 
     st.video(video_bytes)
     #####
-    cv.imshow("output", output)
+    
     # Frames are read by intervals of 10 milliseconds. The programs breaks out of the while loop when the user presses the 'q' key
     if cv.waitKey(10) & 0xFF == ord('q'):
         break
