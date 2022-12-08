@@ -1,5 +1,13 @@
 import cv2 as cv
 import numpy as np
+import tempfile
+import cv2
+import streamlit as st
+import pandas as pd
+import numpy as np
+import subprocess
+import sys
+
 # import matplotlib.pyplot as plt
 
 def do_canny(frame):
@@ -75,7 +83,30 @@ def visualize_lines(frame, lines):
     return lines_visualize
 
 # The video feed is read in as a VideoCapture object
-cap = cv.VideoCapture("input.mp4")
+st.title('Lane Detection')
+st.markdown('Upload a video and detect lane')
+
+st.header('Input Video')
+
+f = st.file_uploader("Upload file")
+
+tfile = tempfile.NamedTemporaryFile(delete=False) 
+tfile.write(f.read())
+
+cap = cv2.VideoCapture(tfile.name)
+
+stframe = st.empty()
+
+while vf.isOpened():
+    ret, frame = cap.read()
+    # if frame is read correctly ret is True
+    if not ret:
+        print("Can't receive frame (stream end?). Exiting ...")
+        break
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    stframe.image(gray)
+    
+#cap = cv.VideoCapture("input.mp4")
 while (cap.isOpened()):
     # ret = a boolean return value from getting the frame, frame = the current frame being projected in the video
     ret, frame = cap.read()
@@ -93,6 +124,13 @@ while (cap.isOpened()):
     # Overlays lines on frame by taking their weighted sums and adding an arbitrary scalar value of 1 as the gamma argument
     output = cv.addWeighted(frame, 0.9, lines_visualize, 1, 1)
     # Opens a new window and displays the output frame
+    ######
+    st.header('Input Video')
+    video_file = open('output.mp4', 'rb')
+    video_bytes = video_file.read()
+
+    st.video(video_bytes)
+    #####
     cv.imshow("output", output)
     # Frames are read by intervals of 10 milliseconds. The programs breaks out of the while loop when the user presses the 'q' key
     if cv.waitKey(10) & 0xFF == ord('q'):
