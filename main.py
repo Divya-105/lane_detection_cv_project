@@ -1,5 +1,16 @@
-import cv2 as cv
-import numpy as np
+"""
+Lane Lines Detection pipeline
+
+Usage:
+    main.py [--video] INPUT_PATH OUTPUT_PATH 
+
+Options:
+
+-h --help                               show this screen
+--video                                 process video file instead of image
+"""
+
+import os
 import tempfile
 import cv2
 import streamlit as st
@@ -8,134 +19,114 @@ import numpy as np
 import subprocess
 import sys
 
-# import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.image as mpimg
+import cv2
+from docopt import docopt
+from IPython.display import HTML, Video
+from moviepy.editor import VideoFileClip
+from CameraCalibration import CameraCalibration
+from Thresholding import *
+from PerspectiveTransformation import *
+from LaneLines import *
 
-def do_canny(frame):
-    # Converts frame to grayscale because we only need the luminance channel for detecting edges - less computationally expensive
-    gray = cv.cvtColor(frame, cv.COLOR_RGB2GRAY)
-    # Applies a 5x5 gaussian blur with deviation of 0 to frame - not mandatory since Canny will do this for us
-    blur = cv.GaussianBlur(gray, (5, 5), 0)
-    # Applies Canny edge detector with minVal of 50 and maxVal of 150
-    canny = cv.Canny(blur, 50, 150)
-    return canny
+class FindLaneLines:
+    """ This class is for parameter tunning.
 
-def do_segment(frame):
-    # Since an image is a multi-directional array containing the relative intensities of each pixel in the image, we can use frame.shape to return a tuple: [number of rows, number of columns, number of channels] of the dimensions of the frame
-    # frame.shape[0] give us the number of rows of pixels the frame has. Since height begins from 0 at the top, the y-coordinate of the bottom of the frame is its height
-    height = frame.shape[0]
-    # Creates a triangular polygon for the mask defined by three (x, y) coordinates
-    polygons = np.array([
-                            [(0, height), (800, height), (380, 290)]
-                        ])
-    # Creates an image filled with zero intensities with the same dimensions as the frame
-    mask = np.zeros_like(frame)
-    # Allows the mask to be filled with values of 1 and the other areas to be filled with values of 0
-    cv.fillPoly(mask, polygons, 255)
-    # A bitwise and operation between the mask and frame keeps only the triangular area of the frame
-    segment = cv.bitwise_and(frame, mask)
-    return segment
+    Attributes:
+        ...
+    """
+    def __init__(self):
+        """ Init Application"""
+        self.calibration = CameraCalibration('camera_cal', 9, 6)
+        self.thresholding = Thresholding()
+        self.transform = PerspectiveTransformation()
+        self.lanelines = LaneLines()
 
-def calculate_lines(frame, lines):
-    # Empty arrays to store the coordinates of the left and right lines
-    left = []
-    right = []
-    # Loops through every detected line
-    for line in lines:
-        # Reshapes line from 2D array to 1D array
-        x1, y1, x2, y2 = line.reshape(4)
-        # Fits a linear polynomial to the x and y coordinates and returns a vector of coefficients which describe the slope and y-intercept
-        parameters = np.polyfit((x1, x2), (y1, y2), 1)
-        slope = parameters[0]
-        y_intercept = parameters[1]
-        # If slope is negative, the line is to the left of the lane, and otherwise, the line is to the right of the lane
-        if slope < 0:
-            left.append((slope, y_intercept))
-        else:
-            right.append((slope, y_intercept))
-    # Averages out all the values for left and right into a single slope and y-intercept value for each line
-    left_avg = np.average(left, axis = 0)
-    right_avg = np.average(right, axis = 0)
-    # Calculates the x1, y1, x2, y2 coordinates for the left and right lines
-    left_line = calculate_coordinates(frame, left_avg)
-    right_line = calculate_coordinates(frame, right_avg)
-    return np.array([left_line, right_line])
+    def forward(self, img):
+        out_img = np.copy(img)
+        img = self.calibration.undistort(img)
+        img = self.transform.forward(img)
+        img = self.thresholding.forward(img)
+        img = self.lanelines.forward(img)
+        img = self.transform.backward(img)
 
-def calculate_coordinates(frame, parameters):
-    slope, intercept = parameters
-    # Sets initial y-coordinate as height from top down (bottom of the frame)
-    y1 = frame.shape[0]
-    # Sets final y-coordinate as 150 above the bottom of the frame
-    y2 = int(y1 - 150)
-    # Sets initial x-coordinate as (y1 - b) / m since y1 = mx1 + b
-    x1 = int((y1 - intercept) / slope)
-    # Sets final x-coordinate as (y2 - b) / m since y2 = mx2 + b
-    x2 = int((y2 - intercept) / slope)
-    return np.array([x1, y1, x2, y2])
+        out_img = cv2.addWeighted(out_img, 1, img, 0.6, 0)
+        out_img = self.lanelines.plot(out_img)
+        return out_img
 
-def visualize_lines(frame, lines):
-    # Creates an image filled with zero intensities with the same dimensions as the frame
-    lines_visualize = np.zeros_like(frame)
-    # Checks if any lines are detected
-    if lines is not None:
-        for x1, y1, x2, y2 in lines:
-            # Draws lines between two coordinates with green color and 5 thickness
-            cv.line(lines_visualize, (x1, y1), (x2, y2), (0, 255, 0), 5)
-    return lines_visualize
+    def process_image(self, input_path, output_path):
+        img = mpimg.imread(input_path)
+        out_img = self.forward(img)
+        mpimg.imsave(output_path, out_img)
 
-# The video feed is read in as a VideoCapture object
-st.title('Lane Detection')
-st.markdown('Upload a video and detect lane')
+    def process_video(self, input_path, output_path):
+        clip = VideoFileClip(input_path)
+        out_clip = clip.fl_image(self.forward)
+        out_clip.write_videofile(output_path, audio=False)
 
-st.header('Input Video')
+def main():
+    # findLaneLines = FindLaneLines()
+    # findLaneLines.process_video("harder_challenge_video.mp4", "output.mp4")
+    findLaneLines = FindLaneLines()
 
-f = st.file_uploader("Upload file")
+    st.title('Lane Detection')
+    st.header('Upload a video and detect lane')
 
-tfile = tempfile.NamedTemporaryFile(delete=False) 
-tfile.write(f.read())
-
-cap = cv2.VideoCapture(tfile.name)
-
-stframe = st.empty()
-
-while vf.isOpened():
-    ret, frame = cap.read()
-    # if frame is read correctly ret is True
-    if not ret:
-        print("Can't receive frame (stream end?). Exiting ...")
-        break
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    stframe.image(gray)
-    
-#cap = cv.VideoCapture("input.mp4")
-while (cap.isOpened()):
-    # ret = a boolean return value from getting the frame, frame = the current frame being projected in the video
-    ret, frame = cap.read()
-    canny = do_canny(frame)
-    # cv.imshow("canny", canny)
-    # plt.imshow(frame)
-    # plt.show()
-    segment = do_segment(canny)
-    hough = cv.HoughLinesP(segment, 2, np.pi / 180, 100, np.array([]), minLineLength = 100, maxLineGap = 50)
-    # Averages multiple detected lines from hough into one line for left border of lane and one line for right border of lane
-    lines = calculate_lines(frame, hough)
-    # Visualizes the lines
-    lines_visualize = visualize_lines(frame, lines)
-    # cv.imshow("hough", lines_visualize)
-    # Overlays lines on frame by taking their weighted sums and adding an arbitrary scalar value of 1 as the gamma argument
-    output = cv.addWeighted(frame, 0.9, lines_visualize, 1, 1)
-    cv.imshow("output", output)
-    # Opens a new window and displays the output frame
-    ######
     st.header('Input Video')
-    video_file = open('output.mp4', 'rb')
-    video_bytes = video_file.read()
 
-    st.video(video_bytes)
-    #####
+    f = st.file_uploader("Upload file")
+    if f is not None:
+        file_details = {"FileName":f.name,"FileType":f.type}
+        st.write(file_details)
+        # st.write(type(st.video_file))
+        # vid = st.load_video(f)
+    # with open(os.path.join("Streamlit - Copy",f.name),"wb") as f: 
+    #       f.write(f.getbuffer())         
+    with open(f.name,"wb") as ff: 
+        ff.write(f.getbuffer())         
+    st.success("Saved File")
+    tfile = tempfile.NamedTemporaryFile(delete=False) 
+    tfile.write(f.read())
+
+    vf = cv2.VideoCapture(tfile.name)
+
+    stframe = st.empty()
+
+    # while vf.isOpened():
+    #     ret, frame = vf.read()
+    #     # if frame is read correctly ret is True
+    #     if not ret:
+    #         print("Can't receive frame (stream end?). Exiting ...")
+    #         break
+    #     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    #     stframe.image(gray)
+        
+    st.header('Processing......')
+
+
+    white_output = './output.mp4'
+    ## To speed up the testing process you may want to try your pipeline on a shorter subclip of the video
+    ## To do so add .subclip(start_second,end_second) to the end of the line below
+    ## Where start_second and end_second are integer values representing the start and end of the subclip
+    ## You may also uncomment the following line for a subclip of the first 5 seconds
+    #clip1 = VideoFileClip("test_videos/jaipurHighway.mp4").subclip(50,60)
+    # os.path.join("tempDir",f.name),"wb"
+
+    clip1 = VideoFileClip(f.name)#("input.mp4")
     
-    # Frames are read by intervals of 10 milliseconds. The programs breaks out of the while loop when the user presses the 'q' key
-    if cv.waitKey(10) & 0xFF == ord('q'):
-        break
-# The following frees up resources and closes all windows
-cap.release()
-cv.destroyAllWindows()
+    # white_clip = clip1.fl_image(findLaneLines.process_video(f.name,"output.mp4")) #NOTE: this function expects color images!!
+    findLaneLines.process_video(f.name,"output.mp4")
+    # white_clip.write_videofile(white_output, audio=False)
+    st.write("hii")
+    video_file = open('output.mp4', 'rb')
+    st.write("hello")
+    video_bytes = video_file.read()
+    st.write("heyyy")
+    st.video(video_bytes)
+
+    
+    
+
+if __name__ == "__main__":
+    main()
