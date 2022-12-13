@@ -3,3 +3,6 @@ pandas
 numpy
 opencv-python-headless
 matplotlib
+docopt
+IPython
+moviepy
